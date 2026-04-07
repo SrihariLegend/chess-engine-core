@@ -1,0 +1,29 @@
+{
+  "type": "local",
+  "id": "chess-engine-core-v0.1.0",
+  "name": "Chess Engine",
+  "version": "0.1.0",
+  "path": "/home/tom/codespace/engine/target/release/chess-engine-core",
+  "image": "",
+  "elo": 1500,
+  "downloadSize": 0,
+  "downloadLink": "",
+  "loaded": true,
+  "go": {
+    "t": "Infinite"
+  },
+  "settings": [
+    {
+      "name": "Threads",
+      "value": 1
+    },
+    {
+      "name": "Hash",
+      "value": 128
+    },
+    {
+      "name": "MultiPV",
+      "value": 1
+    }
+  ]
+}
