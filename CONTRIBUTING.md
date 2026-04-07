@@ -31,11 +31,6 @@ cargo test --test properties
 2. Add module declaration in `src/personality/mod.rs`
 3. Add weight configuration in search/evaluation
 
-### Adding a New Narrative Theme
-1. Create or extend `src/narrative/` modules
-2. Implement theme selection logic in `Storyteller`
-3. Add depth extension logic in `TimeTraveler` if needed
-
 ### Adding UCI Options
 1. Add field to `UciOptions` in `src/uci/mod.rs`
 2. Handle in `handle_setoption()`

@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-A Rust-based chess engine with UCI interface, alpha-beta search, bitboard-based board representation, and modular personality/narrative systems.
+A Rust-based chess engine with UCI interface, alpha-beta search, bitboard-based board representation, and modular personality system.
 
 ## Directory Structure
 
@@ -16,7 +16,7 @@ src/
 ├── eval/            # Position evaluation
 ├── uci/             # UCI protocol handler
 ├── personality/     # Evaluation modifiers (6 implementations)
-└── narrative/       # Theme-based search guidance
+└── narrative/       # (removed - not implemented)
 tests/properties/    # Property-based tests
 ```
 
@@ -47,13 +47,6 @@ Located in `src/personality/`:
 - `ChaosTheory` - Simplification scoring
 - `AsymmetryAddict` - Board asymmetry
 - `ZugzwangHunter` - Endgame move counting
-
-## Narrative Themes
-
-Located in `src/narrative/`:
-- `Storyteller` - Theme selection
-- `Mirage` - Strategic purpose detection
-- `TimeTraveler` - Depth extensions
 
 ## Testing
 
