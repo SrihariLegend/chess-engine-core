@@ -869,6 +869,12 @@ impl Board {
             .any(|&h| h == self.zobrist_hash)
     }
 
+    /// Returns true if this position has occurred before in the game (for TT safety).
+    pub fn has_occurred_before(&self) -> bool {
+        let count = self.position_history.iter().filter(|&&h| h == self.zobrist_hash).count();
+        count > 1
+    }
+
     /// Applies a move to the board, updating all state incrementally.
     ///
     /// Saves undo information to the history stack so the move can be reversed

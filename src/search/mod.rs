@@ -582,12 +582,13 @@ impl SearchState {
         // Check extension: extend search by 1 ply when in check
         let mut depth = if in_check { depth + 1 } else { depth };
 
-        // TT probe
+        // TT probe - skip cutoffs if position has occurred before (path-dependent)
         let hash = board.zobrist_hash;
         let mut tt_move: Option<Move> = None;
+        let could_repeat = board.has_occurred_before();
         if let Some(entry) = self.tt.probe(hash) {
             tt_move = entry.best_move;
-            if entry.depth >= depth && !is_pv_node {
+            if entry.depth >= depth && !is_pv_node && !could_repeat {
                 match entry.node_type {
                     NodeType::Exact => {
                         if let Some(mv) = entry.best_move {
