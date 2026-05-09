@@ -511,6 +511,8 @@ pub struct Board {
     pub zobrist_hash: u64,
     /// Undo stack for unmake_move.
     history: Vec<UndoInfo>,
+    /// Position hashes since last irreversible move (for repetition detection).
+    position_history: Vec<u64>,
 }
 
 impl Board {
@@ -549,8 +551,10 @@ impl Board {
             fullmove_number: 1,
             zobrist_hash: 0,
             history: Vec::new(),
+            position_history: Vec::new(),
         };
         board.zobrist_hash = board.compute_zobrist_hash();
+        board.position_history.push(board.zobrist_hash);
         board
     }
 
@@ -788,8 +792,10 @@ impl Board {
             fullmove_number,
             zobrist_hash: 0,
             history: Vec::new(),
+            position_history: Vec::new(),
         };
         board.zobrist_hash = board.compute_zobrist_hash();
+        board.position_history.push(board.zobrist_hash);
         Ok(board)
     }
 
@@ -855,6 +861,12 @@ impl Board {
             return true;
         }
         false
+    }
+
+    /// Returns true if the current position is a repetition (has occurred before).
+    pub fn is_repetition(&self) -> bool {
+        self.position_history.iter().rev().skip(1)
+            .any(|&h| h == self.zobrist_hash)
     }
 
     /// Applies a move to the board, updating all state incrementally.
@@ -984,9 +996,10 @@ impl Board {
             self.en_passant = None;
         }
 
-        // 8. Update halfmove clock
+        // 8. Update halfmove clock and position history
         if mv.piece == Piece::Pawn || mv.captured.is_some() {
             self.halfmove_clock = 0;
+            self.position_history.clear();
         } else {
             self.halfmove_clock += 1;
         }
@@ -1002,6 +1015,9 @@ impl Board {
 
         // 11. Recompute occupancy
         self.update_occupancy();
+
+        // 12. Record position for repetition detection
+        self.position_history.push(self.zobrist_hash);
     }
 
     /// Reverses the last move, restoring the board to its previous state.
@@ -1068,6 +1084,9 @@ impl Board {
         self.halfmove_clock = undo.halfmove_clock;
         self.fullmove_number = undo.fullmove_number;
         self.zobrist_hash = undo.zobrist_hash;
+
+        // Pop position from repetition history
+        self.position_history.pop();
 
         // Recompute occupancy
         self.update_occupancy();

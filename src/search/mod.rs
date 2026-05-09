@@ -328,6 +328,8 @@ pub struct SearchState {
     allocated_time_ms: u64,
     // Thread count
     pub threads: usize,
+    // Contempt for draw avoidance
+    pub contempt: i32,
 }
 
 impl SearchState {
@@ -356,6 +358,7 @@ impl SearchState {
             start_time: None,
             allocated_time_ms: u64::MAX,
             threads: 1,
+            contempt: 50,
         }
     }
 
@@ -565,6 +568,12 @@ impl SearchState {
         }
         if self.stop.load(Ordering::Relaxed) {
             return 0;
+        }
+
+        // Repetition detection: use contempt to discourage draws
+        // Positive contempt = avoid draws, negative = seek draws
+        if ply > 0 && board.is_repetition() {
+            return -self.contempt;
         }
 
         let is_pv_node = beta - alpha > 1;

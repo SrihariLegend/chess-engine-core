@@ -13,6 +13,7 @@ pub struct UciOptions {
     pub max_depth: u32,
     pub threads: usize,
     pub personality: String,
+    pub contempt: i32,
 }
 
 impl UciOptions {
@@ -22,6 +23,7 @@ impl UciOptions {
             max_depth: 64,
             threads: 1,
             personality: "balanced".to_string(),
+            contempt: 50,
         }
     }
 }
@@ -94,6 +96,7 @@ impl UciHandler {
         println!("option name Hash type spin default 64 min 1 max 4096");
         println!("option name MaxDepth type spin default 64 min 1 max 128");
         println!("option name Threads type spin default 1 min 1 max 256");
+        println!("option name Contempt type spin default 50 min -500 max 500");
         println!("option name Personality type combo default balanced var balanced var aggressive var defensive var positional var tactical var dynamic");
         println!("uciok");
     }
@@ -223,6 +226,7 @@ impl UciHandler {
 
         // Apply thread count from options
         self.search_state.threads = self.options.threads;
+        self.search_state.contempt = self.options.contempt;
         self.search_state.apply_personality(&self.options.personality);
         if self.options.personality == "dynamic" {
             self.search_state.update_dynamic_weights(&self.board);
@@ -305,6 +309,11 @@ impl UciHandler {
                 let valid = ["balanced", "aggressive", "defensive", "positional", "tactical", "dynamic"];
                 if valid.contains(&value_str.to_lowercase().as_str()) {
                     self.options.personality = value_str.to_lowercase();
+                }
+            }
+            "contempt" => {
+                if let Ok(c) = value_str.parse::<i32>() {
+                    self.options.contempt = c.clamp(-500, 500);
                 }
             }
             _ => {} // Ignore unknown options

@@ -943,3 +943,197 @@ mod make_unmake_tests {
         );
     }
 }
+
+
+// ─── Repetition Detection Tests ──────────────────────────────────────────────
+
+#[cfg(test)]
+mod repetition_tests {
+    use super::*;
+
+    fn setup() {
+        magic::init_magic_tables();
+    }
+
+    #[test]
+    fn no_repetition_at_start() {
+        setup();
+        let board = Board::new();
+        assert!(!board.is_repetition());
+    }
+
+    #[test]
+    fn single_move_no_repetition() {
+        setup();
+        let mut board = Board::new();
+        let mv = Move::quiet(12, 28, Piece::Pawn);
+        board.make_move(mv);
+        assert!(!board.is_repetition());
+    }
+
+    #[test]
+    fn twofold_repetition_detected() {
+        setup();
+        let mut board = Board::new();
+        let nf3 = Move::quiet(6, 21, Piece::Knight);
+        let nf6 = Move::quiet(62, 45, Piece::Knight);
+        let ng1 = Move::quiet(21, 6, Piece::Knight);
+        let ng8 = Move::quiet(45, 62, Piece::Knight);
+
+        board.make_move(nf3);
+        board.make_move(nf6);
+        board.make_move(ng1);
+        board.make_move(ng8);
+        assert!(board.is_repetition(), "Should detect twofold repetition");
+    }
+
+    #[test]
+    fn repetition_after_unmake_not_detected() {
+        setup();
+        let mut board = Board::new();
+        let nf3 = Move::quiet(6, 21, Piece::Knight);
+        let nf6 = Move::quiet(62, 45, Piece::Knight);
+        let ng1 = Move::quiet(21, 6, Piece::Knight);
+        let ng8 = Move::quiet(45, 62, Piece::Knight);
+
+        board.make_move(nf3);
+        board.make_move(nf6);
+        board.make_move(ng1);
+        board.make_move(ng8);
+        assert!(board.is_repetition());
+        board.unmake_move(ng8);
+        assert!(!board.is_repetition(), "Repetition should clear after unmake");
+    }
+
+    #[test]
+    fn capture_breaks_repetition_chain() {
+        setup();
+        let mut board = Board::from_fen("r1bqkbnr/pppppppp/2n5/8/8/5N2/PPPPPPPP/RNBQKB1R w KQkq - 2 2").unwrap();
+        let initial_hash = board.zobrist_hash;
+        
+        let ng1 = Move::quiet(21, 6, Piece::Knight);
+        board.make_move(ng1);
+        let nb8 = Move::quiet(42, 57, Piece::Knight);
+        board.make_move(nb8);
+        
+        let e4 = Move::quiet(12, 28, Piece::Pawn);
+        board.make_move(e4);
+        
+        assert_ne!(board.zobrist_hash, initial_hash);
+    }
+
+    // ─── Adversarial Test Cases ──────────────────────────────────────────────
+
+    #[test]
+    fn adversarial_bishop_shuffle() {
+        // Two-player bishop shuffle: Bf1-e2, Bf8-e7, Be2-f1, Be7-f8 (back to start)
+        setup();
+        let mut board = Board::from_fen("4kb2/8/8/8/8/8/8/4KB2 w - - 0 1").unwrap();
+        let be2 = Move::quiet(5, 12, Piece::Bishop);   // White Bf1-e2
+        let be7 = Move::quiet(61, 52, Piece::Bishop);  // Black Bf8-e7
+        let bf1 = Move::quiet(12, 5, Piece::Bishop);   // White Be2-f1
+        let bf8 = Move::quiet(52, 61, Piece::Bishop);  // Black Be7-f8
+        
+        assert!(!board.is_repetition());
+        board.make_move(be2);
+        board.make_move(be7);
+        board.make_move(bf1);
+        board.make_move(bf8);
+        assert!(board.is_repetition(), "Adversarial: bishop shuffle should repeat");
+    }
+
+    #[test]
+    fn adversarial_king_triangle() {
+        setup();
+        let mut board = Board::from_fen("8/8/8/8/8/8/8/4K3 w - - 0 1").unwrap();
+        let kd1 = Move::quiet(4, 3, Piece::King);
+        let kd2 = Move::quiet(3, 11, Piece::King);
+        let ke1 = Move::quiet(11, 4, Piece::King);
+        
+        board.make_move(kd1);
+        board.make_move(kd2);
+        board.make_move(ke1);
+        assert!(!board.is_repetition(), "Triangle path is not repetition (odd moves)");
+    }
+
+    #[test]
+    fn adversarial_rook_oscillation() {
+        // Two-player rook oscillation
+        setup();
+        let mut board = Board::from_fen("r3k3/8/8/8/8/8/8/R3K3 w - - 0 1").unwrap();
+        let wra2 = Move::quiet(0, 8, Piece::Rook);   // White Ra1-a2
+        let bra7 = Move::quiet(56, 48, Piece::Rook); // Black Ra8-a7
+        let wra1 = Move::quiet(8, 0, Piece::Rook);   // White Ra2-a1
+        let bra8 = Move::quiet(48, 56, Piece::Rook); // Black Ra7-a8
+        
+        board.make_move(wra2);
+        board.make_move(bra7);
+        board.make_move(wra1);
+        board.make_move(bra8);
+        assert!(board.is_repetition(), "Adversarial: rook oscillation");
+    }
+
+    #[test]
+    fn adversarial_castling_rights_differ() {
+        setup();
+        let board1 = Board::from_fen("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1").unwrap();
+        let board2 = Board::from_fen("r3k2r/8/8/8/8/8/8/R3K2R w - - 0 1").unwrap();
+        assert_ne!(board1.zobrist_hash, board2.zobrist_hash, "Castling rights must affect hash");
+    }
+
+    #[test]
+    fn adversarial_en_passant_differs() {
+        setup();
+        let board1 = Board::from_fen("8/8/8/pP6/8/8/8/4K3 w - - 0 1").unwrap();
+        let board2 = Board::from_fen("8/8/8/pP6/8/8/8/4K3 w - a6 0 1").unwrap();
+        assert_ne!(board1.zobrist_hash, board2.zobrist_hash, "En passant must affect hash");
+    }
+
+    #[test]
+    fn adversarial_side_to_move_differs() {
+        setup();
+        let board1 = Board::from_fen("8/8/8/8/8/8/8/4K3 w - - 0 1").unwrap();
+        let board2 = Board::from_fen("8/8/8/8/8/8/8/4K3 b - - 0 1").unwrap();
+        assert_ne!(board1.zobrist_hash, board2.zobrist_hash, "Side to move must affect hash");
+    }
+
+    #[test]
+    fn adversarial_threefold_sequence() {
+        setup();
+        let mut board = Board::new();
+        let nf3 = Move::quiet(6, 21, Piece::Knight);
+        let nf6 = Move::quiet(62, 45, Piece::Knight);
+        let ng1 = Move::quiet(21, 6, Piece::Knight);
+        let ng8 = Move::quiet(45, 62, Piece::Knight);
+
+        board.make_move(nf3);
+        board.make_move(nf6);
+        board.make_move(ng1);
+        board.make_move(ng8);
+        assert!(board.is_repetition(), "Second occurrence");
+        
+        board.make_move(nf3);
+        board.make_move(nf6);
+        board.make_move(ng1);
+        board.make_move(ng8);
+        assert!(board.is_repetition(), "Third occurrence (threefold)");
+    }
+
+    #[test]
+    fn adversarial_near_repetition_different_piece() {
+        setup();
+        let mut board = Board::from_fen("8/8/8/8/8/8/8/4K1N1 w - - 0 1").unwrap();
+        let hash1 = board.zobrist_hash;
+        
+        let nf3 = Move::quiet(6, 21, Piece::Knight);
+        let ne5 = Move::quiet(21, 36, Piece::Knight);
+        let ng6 = Move::quiet(36, 47, Piece::Knight);
+        
+        board.make_move(nf3);
+        board.make_move(ne5);
+        board.make_move(ng6);
+        
+        assert_ne!(board.zobrist_hash, hash1);
+        assert!(!board.is_repetition());
+    }
+}
