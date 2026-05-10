@@ -1,7 +1,7 @@
 // Asymmetry Addict personality: rewards pawn file asymmetry, penalizes symmetry
 
 use crate::board::{Board, Color, Piece};
-use crate::personality::{GameContext, PersonalityEval};
+use crate::personality::{squash_to_cp, GameContext, PersonalityEval};
 
 /// Bonus per asymmetric pawn file (we have pawn, opponent doesn't).
 const ASYMMETRY_BONUS: i32 = 5;
@@ -82,7 +82,7 @@ impl PersonalityEval for AsymmetryAddict {
             score += IMBALANCE_BONUS;
         }
 
-        score
+        squash_to_cp(score as f32, 40.0)
     }
 
     fn weight(&self) -> f32 {
@@ -144,8 +144,9 @@ mod tests {
         let ctx = default_ctx();
         let aa = AsymmetryAddict::new();
         let score = aa.evaluate(&board, &ctx);
-        // White has bishop pair (+15), black doesn't (-0) = +15
-        assert_eq!(score, 15);
+        // White has bishop pair, should be positive
+        assert!(score > 0, "Bishop pair should give positive score, got {}", score);
+        assert!(score <= 100, "Score should be in [-100, 100], got {}", score);
     }
 
     #[test]
@@ -155,8 +156,9 @@ mod tests {
         let ctx = default_ctx();
         let aa = AsymmetryAddict::new();
         let score = aa.evaluate(&board, &ctx);
-        // White has pawns on a2,b2, black has none → 2 asymmetric files * 5 = 10
-        assert_eq!(score, 10);
+        // White has pawns on a2,b2, black has none → positive score
+        assert!(score > 0, "Pawn file asymmetry should give positive score, got {}", score);
+        assert!(score <= 100, "Score should be in [-100, 100], got {}", score);
     }
 
     #[test]

@@ -2,7 +2,7 @@
 
 use crate::board::{Board, Piece};
 use crate::board::magic;
-use crate::personality::{GameContext, PersonalityEval};
+use crate::personality::{squash_to_cp, GameContext, PersonalityEval};
 
 /// Bonus per square attacked by a piece.
 const ACTIVITY_BONUS: i32 = 3;
@@ -56,7 +56,7 @@ impl PersonalityEval for Romantic {
             }
         }
 
-        score
+        squash_to_cp(score as f32, 120.0)
     }
 
     fn weight(&self) -> f32 {

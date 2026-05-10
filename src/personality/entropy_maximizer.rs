@@ -1,7 +1,7 @@
 // Entropy Maximizer personality: rewards move count asymmetry
 
 use crate::board::Board;
-use crate::personality::{GameContext, PersonalityEval};
+use crate::personality::{squash_to_cp, GameContext, PersonalityEval};
 
 /// Bonus per move advantage over opponent.
 const ENTROPY_FACTOR: i32 = 3;
@@ -18,7 +18,8 @@ impl EntropyMaximizer {
 
 impl PersonalityEval for EntropyMaximizer {
     fn evaluate(&self, _board: &Board, ctx: &GameContext) -> i32 {
-        (ctx.side_to_move_moves as i32 - ctx.opponent_moves as i32) * ENTROPY_FACTOR
+        let diff = ctx.side_to_move_moves as i32 - ctx.opponent_moves as i32;
+        squash_to_cp(diff as f32 * ENTROPY_FACTOR as f32, 90.0)
     }
 
     fn weight(&self) -> f32 {
@@ -55,8 +56,8 @@ mod tests {
         let board = Board::new();
         let em = EntropyMaximizer::new();
         let score = em.evaluate(&board, &make_ctx(30, 20));
-        // (30 - 20) * 3 = 30
-        assert_eq!(score, 30);
+        assert!(score > 0, "More moves should give positive score, got {}", score);
+        assert!(score <= 100, "Score should be in [-100, 100], got {}", score);
     }
 
     #[test]
@@ -64,8 +65,8 @@ mod tests {
         let board = Board::new();
         let em = EntropyMaximizer::new();
         let score = em.evaluate(&board, &make_ctx(10, 25));
-        // (10 - 25) * 3 = -45
-        assert_eq!(score, -45);
+        assert!(score < 0, "Fewer moves should give negative score, got {}", score);
+        assert!(score >= -100, "Score should be in [-100, 100], got {}", score);
     }
 
     #[test]
@@ -82,9 +83,8 @@ mod tests {
         let em = EntropyMaximizer::new();
         let score1 = em.evaluate(&board, &make_ctx(25, 20));
         let score2 = em.evaluate(&board, &make_ctx(30, 20));
-        // score2 should be double score1: 15 vs 30 (factor = 3)
-        assert_eq!(score1, 15);
-        assert_eq!(score2, 30);
+        assert!(score2 > score1,
+            "Larger advantage (30-20={}) should score higher than (25-20={})", score2, score1);
     }
 
     #[test]

@@ -1,7 +1,7 @@
 // Momentum Tracker personality: adjusts aggression based on eval trend
 
 use crate::board::Board;
-use crate::personality::{GameContext, PersonalityEval};
+use crate::personality::{squash_to_cp, GameContext, PersonalityEval};
 
 /// Scaling factor for momentum bonus/penalty.
 const MOMENTUM_FACTOR: i32 = 2;
@@ -18,9 +18,10 @@ impl MomentumTracker {
 
 impl PersonalityEval for MomentumTracker {
     fn evaluate(&self, _board: &Board, ctx: &GameContext) -> i32 {
-        // Note: Momentum uses past total evaluations, which include momentum itself.
-        // This can amplify trends but is intentional for personality expression.
-        ctx.momentum() * MOMENTUM_FACTOR
+        // Uses base eval history only (personality contribution excluded in
+        // iterative_deepening), preventing positive feedback loop.
+        let m = ctx.momentum();
+        squash_to_cp((m * MOMENTUM_FACTOR) as f32, 100.0)
     }
 
     fn weight(&self) -> f32 {
@@ -60,22 +61,20 @@ mod tests {
     fn positive_momentum_gives_positive_score() {
         let board = Board::new();
         let mt = MomentumTracker::new();
-        // Increasing evals: 0, 10, 20, 30 → slope = 10
         let ctx = make_ctx_with_evals(&[0, 10, 20, 30]);
         let score = mt.evaluate(&board, &ctx);
-        // momentum = 10, score = 10 * 2 = 20
-        assert_eq!(score, 20);
+        assert!(score > 0, "Positive momentum should give positive score, got {}", score);
+        assert!(score <= 100, "Score should be in [-100, 100], got {}", score);
     }
 
     #[test]
     fn negative_momentum_gives_negative_score() {
         let board = Board::new();
         let mt = MomentumTracker::new();
-        // Decreasing evals: 30, 20, 10, 0 → slope = -10
         let ctx = make_ctx_with_evals(&[30, 20, 10, 0]);
         let score = mt.evaluate(&board, &ctx);
-        // momentum = -10, score = -10 * 2 = -20
-        assert_eq!(score, -20);
+        assert!(score < 0, "Negative momentum should give negative score, got {}", score);
+        assert!(score >= -100, "Score should be in [-100, 100], got {}", score);
     }
 
     #[test]

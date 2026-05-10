@@ -1,7 +1,7 @@
 // Zugzwang Hunter personality: seeks positions with few opponent moves
 
 use crate::board::{Board, GamePhase};
-use crate::personality::{GameContext, PersonalityEval};
+use crate::personality::{squash_to_cp, GameContext, PersonalityEval};
 
 /// Base bonus scaling factor.
 const ZUGZWANG_BASE: i32 = 40;
@@ -21,17 +21,14 @@ impl ZugzwangHunter {
 
 impl PersonalityEval for ZugzwangHunter {
     fn evaluate(&self, _board: &Board, ctx: &GameContext) -> i32 {
-        // Bonus inversely proportional to opponent's legal move count
-        // Clamp denominator to min 1
-        let opp_moves = ctx.opponent_moves.max(1) as i32;
-        let mut bonus = ZUGZWANG_BASE / opp_moves;
+        let opp_moves = ctx.opponent_moves.max(1) as f32;
+        let mut raw = ZUGZWANG_BASE as f32 / opp_moves;
 
-        // Increased weight during Endgame phase
         if ctx.phase == GamePhase::Endgame {
-            bonus *= ENDGAME_MULTIPLIER;
+            raw *= ENDGAME_MULTIPLIER as f32;
         }
 
-        bonus
+        squash_to_cp(raw, 80.0)
     }
 
     fn weight(&self) -> f32 {
@@ -69,10 +66,8 @@ mod tests {
         let zh = ZugzwangHunter::new();
         let score_few = zh.evaluate(&board, &make_ctx(2, GamePhase::Opening));
         let score_many = zh.evaluate(&board, &make_ctx(20, GamePhase::Opening));
-        // 40/2 = 20 vs 40/20 = 2
-        assert_eq!(score_few, 20);
-        assert_eq!(score_many, 2);
-        assert!(score_few > score_many);
+        assert!(score_few > score_many, "Fewer opponent moves (2) should score higher than many (20): {} vs {}", score_few, score_many);
+        assert!(score_few > 0, "Few moves should give positive bonus, got {}", score_few);
     }
 
     #[test]
@@ -80,8 +75,8 @@ mod tests {
         let board = Board::new();
         let zh = ZugzwangHunter::new();
         let score = zh.evaluate(&board, &make_ctx(0, GamePhase::Opening));
-        // 40 / max(0, 1) = 40
-        assert_eq!(score, 40);
+        assert!(score > 0, "Zero moves (clamped to 1) should give positive bonus, got {}", score);
+        assert!(score <= 100, "Score should be in [-100, 100], got {}", score);
     }
 
     #[test]
@@ -90,10 +85,8 @@ mod tests {
         let zh = ZugzwangHunter::new();
         let score_opening = zh.evaluate(&board, &make_ctx(10, GamePhase::Opening));
         let score_endgame = zh.evaluate(&board, &make_ctx(10, GamePhase::Endgame));
-        // Opening: 40/10 = 4, Endgame: 40/10 * 3 = 12
-        assert_eq!(score_opening, 4);
-        assert_eq!(score_endgame, 12);
-        assert_eq!(score_endgame, score_opening * ENDGAME_MULTIPLIER);
+        assert!(score_endgame > score_opening,
+            "Endgame score ({}) should be higher than opening ({})", score_endgame, score_opening);
     }
 
     #[test]
@@ -103,7 +96,7 @@ mod tests {
         let phases = [GamePhase::Opening, GamePhase::EarlyMiddlegame, GamePhase::LateMiddlegame];
         for phase in phases {
             let score = zh.evaluate(&board, &make_ctx(10, phase));
-            assert_eq!(score, 4, "Non-endgame phase {:?} should give 4", phase);
+            assert!(score >= 0, "Non-endgame phase {:?} should give non-negative score, got {}", phase, score);
         }
     }
 

@@ -12,7 +12,8 @@ pub struct UciOptions {
     pub hash_size_mb: usize,
     pub max_depth: u32,
     pub threads: usize,
-    pub personality: String,
+    pub style_profile: String,
+    pub style_intensity: f32,
     pub contempt: i32,
 }
 
@@ -22,7 +23,8 @@ impl UciOptions {
             hash_size_mb: 128,
             max_depth: 64,
             threads: 1,
-            personality: "balanced".to_string(),
+            style_profile: "lasker".to_string(),
+            style_intensity: 0.3,
             contempt: 50,
         }
     }
@@ -97,7 +99,8 @@ impl UciHandler {
         println!("option name MaxDepth type spin default 64 min 1 max 128");
         println!("option name Threads type spin default 1 min 1 max 256");
         println!("option name Contempt type spin default 50 min -500 max 500");
-        println!("option name Personality type combo default balanced var balanced var aggressive var defensive var positional var tactical var dynamic");
+        println!("option name StyleProfile type combo default lasker var tal var petrosian var karpov var capablanca var morphy var alekhine var lasker");
+        println!("option name StyleIntensity type spin default 30 min 0 max 100");
         println!("uciok");
     }
 
@@ -224,13 +227,11 @@ impl UciHandler {
             // Don't override — let the search use its default
         }
 
-        // Apply thread count from options
+        // Apply style profile from options
         self.search_state.threads = self.options.threads;
         self.search_state.contempt = self.options.contempt;
-        self.search_state.apply_personality(&self.options.personality);
-        if self.options.personality == "dynamic" {
-            self.search_state.update_dynamic_weights(&self.board);
-        }
+        self.search_state.style_intensity = self.options.style_intensity;
+        self.search_state.set_profile(&self.options.style_profile);
 
         let best = self.search_state.search(&mut self.board, params);
         match best {
@@ -305,10 +306,14 @@ impl UciHandler {
                     self.options.threads = threads;
                 }
             }
-            "personality" => {
-                let valid = ["balanced", "aggressive", "defensive", "positional", "tactical", "dynamic"];
-                if valid.contains(&value_str.to_lowercase().as_str()) {
-                    self.options.personality = value_str.to_lowercase();
+            "styleprofile" => {
+                if crate::personality::profile::profile_by_name(&value_str.to_lowercase()).is_some() {
+                    self.options.style_profile = value_str.to_lowercase();
+                }
+            }
+            "styleintensity" => {
+                if let Ok(v) = value_str.parse::<u32>() {
+                    self.options.style_intensity = (v as f32 / 100.0).clamp(0.0, 1.0);
                 }
             }
             "contempt" => {

@@ -4,6 +4,7 @@ pub mod entropy_maximizer;
 pub mod asymmetry_addict;
 pub mod momentum_tracker;
 pub mod zugzwang_hunter;
+pub mod profile;
 
 // Re-exports for convenience
 pub use chaos_theory::ChaosTheory;
@@ -13,8 +14,20 @@ pub use asymmetry_addict::AsymmetryAddict;
 pub use momentum_tracker::MomentumTracker;
 pub use zugzwang_hunter::ZugzwangHunter;
 
-use crate::board::{Board, GamePhase, Piece};
-use crate::eval::piece_value;
+use crate::board::{Board, GamePhase};
+
+// ─── Normalization ────────────────────────────────────────────────────────────
+
+/// Squash a raw float to [-1, +1] via tanh and scale to centipawns.
+/// `scale` is the raw value at which tanh reaches ~0.76 (i.e., ~76 cp).
+/// Values beyond ±5× scale are clamped before tanh.
+pub fn squash_to_cp(raw: f32, scale: f32) -> i32 {
+    if scale <= 0.0 {
+        return 0;
+    }
+    let clamped = (raw / scale).clamp(-5.0, 5.0);
+    (clamped.tanh() * 100.0) as i32
+}
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -22,10 +35,12 @@ use crate::eval::piece_value;
 pub const NUM_PERSONALITIES: usize = 6;
 
 // Personality indices: 0=Chaos, 1=Romantic, 2=Entropy, 3=Asymmetry, 4=Momentum, 5=Zugzwang
-const CHAOS: usize = 0;
-const ENTROPY: usize = 2;
-const MOMENTUM: usize = 4;
-const ZUGZWANG: usize = 5;
+pub(crate) const CHAOS: usize = 0;
+pub(crate) const ROMANTIC: usize = 1;
+pub(crate) const ENTROPY: usize = 2;
+pub(crate) const ASYMMETRY: usize = 3;
+pub(crate) const MOMENTUM: usize = 4;
+pub(crate) const ZUGZWANG: usize = 5;
 
 // ─── PersonalityEval Trait ───────────────────────────────────────────────────
 
@@ -143,134 +158,6 @@ impl GameContext {
 impl Default for GameContext {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-// ─── GameArc ─────────────────────────────────────────────────────────────────
-
-/// Game arc weight table: maps GamePhase to per-personality weight multipliers.
-/// Personality indices: 0=Chaos, 1=Romantic, 2=Entropy, 3=Asymmetry, 4=Momentum, 5=Zugzwang
-pub struct GameArc {
-    /// weights[phase_index][personality_index]
-    pub weights: [[f32; NUM_PERSONALITIES]; 4],
-}
-
-impl GameArc {
-    /// Returns the default weight profiles per phase.
-    pub fn default_arc() -> Self {
-        GameArc {
-            weights: [
-                // Opening:       Chaos  Romantic Entropy Asymmetry Momentum Zugzwang
-                [0.5, 1.2, 0.5, 0.8, 0.3, 0.1],
-                // EarlyMiddlegame:
-                [1.2, 0.8, 1.2, 0.8, 0.5, 0.3],
-                // LateMiddlegame:
-                [0.8, 0.5, 0.8, 0.5, 1.2, 0.5],
-                // Endgame:
-                [0.3, 0.3, 0.5, 0.3, 1.0, 1.5],
-            ],
-        }
-    }
-
-    /// Get the phase weight for a given phase and personality index.
-    pub fn get_weight(&self, phase: GamePhase, personality_idx: usize) -> f32 {
-        let phase_idx = match phase {
-            GamePhase::Opening => 0,
-            GamePhase::EarlyMiddlegame => 1,
-            GamePhase::LateMiddlegame => 2,
-            GamePhase::Endgame => 3,
-        };
-        self.weights[phase_idx][personality_idx]
-    }
-
-    /// Set the phase weight for a given phase and personality index.
-    pub fn set_weight(&mut self, phase: GamePhase, personality_idx: usize, w: f32) {
-        let phase_idx = match phase {
-            GamePhase::Opening => 0,
-            GamePhase::EarlyMiddlegame => 1,
-            GamePhase::LateMiddlegame => 2,
-            GamePhase::Endgame => 3,
-        };
-        self.weights[phase_idx][personality_idx] = w;
-    }
-}
-
-// ─── Personality Summation ───────────────────────────────────────────────────
-
-/// Compute the total personality contribution to evaluation.
-/// Formula: sum(weight_i * phase_weight_i * personality_i.evaluate(board, ctx))
-pub fn personality_score(
-    board: &Board,
-    ctx: &GameContext,
-    personalities: &[Box<dyn PersonalityEval>],
-    arc: &GameArc,
-) -> i32 {
-    let mut total = 0.0f32;
-    for (i, p) in personalities.iter().enumerate() {
-        let eval = p.evaluate(board, ctx) as f32;
-        let weight = p.weight();
-        let phase_weight = arc.get_weight(ctx.phase, i);
-        total += weight * phase_weight * eval;
-    }
-    total as i32
-}
-
-// ─── Dynamic Weight Update ───────────────────────────────────────────────────
-
-/// Compute net material for the side to move in centipawns.
-fn net_material(board: &Board) -> f32 {
-    let us = board.side_to_move.index();
-    let them = board.side_to_move.opposite().index();
-    let mut score = 0i32;
-    for &piece in &[Piece::Pawn, Piece::Knight, Piece::Bishop, Piece::Rook, Piece::Queen] {
-        let ours = board.pieces[us][piece.index()].count_ones() as i32;
-        let theirs = board.pieces[them][piece.index()].count_ones() as i32;
-        score += (ours - theirs) * piece_value(piece);
-    }
-    score as f32 / 100.0
-}
-
-/// State-only dynamic weight adjustment. Reads board material, move counts,
-/// and piece density to adjust personality weights each move. No circular
-/// dependency — never uses the engine's own evaluation.
-pub fn update_dynamic_weights(
-    board: &Board,
-    ctx: &GameContext,
-    arc: &GameArc,
-    personalities: &mut [Box<dyn PersonalityEval>],
-) {
-    let net = net_material(board);
-    let move_adv = (ctx.side_to_move_moves as f32 - ctx.opponent_moves as f32) / 20.0;
-    let total_pieces = board.all_occupancy.count_ones() as f32;
-    let endgame_factor = ((16.0 - total_pieces) / 16.0).clamp(0.0, 1.0);
-
-    let mut deltas = [0.0f32; NUM_PERSONALITIES];
-
-    // 1. Material advantage
-    if net > 0.0 {
-        let capped = net.clamp(0.0, 2.0);
-        deltas[ZUGZWANG] += 0.1 * capped;
-        deltas[CHAOS] -= 0.05 * capped;
-    } else if net < 0.0 {
-        let capped = (-net).clamp(0.0, 2.0);
-        deltas[CHAOS] += 0.1 * capped;
-        deltas[ZUGZWANG] -= 0.05;
-    }
-
-    // 2. Move count disparity
-    deltas[ENTROPY] += 0.1 * move_adv;
-    deltas[CHAOS] += 0.05 * move_adv;
-
-    // 3. Piece density (endgame factor)
-    deltas[ZUGZWANG] += 0.2 * endgame_factor;
-    deltas[MOMENTUM] += 0.1 * endgame_factor;
-
-    // Combine: baseline + deltas, clamp, then smooth
-    for (i, p) in personalities.iter_mut().enumerate() {
-        let baseline = arc.get_weight(ctx.phase, i);
-        let target = (baseline + deltas[i]).clamp(0.2, 2.5);
-        let smoothed = 0.9 * p.weight() + 0.1 * target;
-        p.set_weight(smoothed);
     }
 }
 
@@ -419,94 +306,4 @@ mod tests {
         assert_eq!(ctx.phase, GamePhase::Endgame);
     }
 
-    #[test]
-    fn game_arc_default_values() {
-        let arc = GameArc::default_arc();
-
-        // Opening
-        assert_eq!(arc.get_weight(GamePhase::Opening, 0), 0.5);  // Chaos
-        assert_eq!(arc.get_weight(GamePhase::Opening, 1), 1.2);  // Romantic
-        assert_eq!(arc.get_weight(GamePhase::Opening, 2), 0.5);  // Entropy
-        assert_eq!(arc.get_weight(GamePhase::Opening, 3), 0.8);  // Asymmetry
-        assert_eq!(arc.get_weight(GamePhase::Opening, 4), 0.3);  // Momentum
-        assert_eq!(arc.get_weight(GamePhase::Opening, 5), 0.1);  // Zugzwang
-
-        // Endgame
-        assert_eq!(arc.get_weight(GamePhase::Endgame, 0), 0.3);
-        assert_eq!(arc.get_weight(GamePhase::Endgame, 1), 0.3);
-        assert_eq!(arc.get_weight(GamePhase::Endgame, 2), 0.5);
-        assert_eq!(arc.get_weight(GamePhase::Endgame, 3), 0.3);
-        assert_eq!(arc.get_weight(GamePhase::Endgame, 4), 1.0);
-        assert_eq!(arc.get_weight(GamePhase::Endgame, 5), 1.5);
-    }
-
-    #[test]
-    fn game_arc_set_weight() {
-        let mut arc = GameArc::default_arc();
-        arc.set_weight(GamePhase::Opening, 0, 2.0);
-        assert_eq!(arc.get_weight(GamePhase::Opening, 0), 2.0);
-    }
-
-    // Test personality_score with mock personalities
-    struct MockPersonality {
-        eval_value: i32,
-        w: f32,
-        n: &'static str,
-    }
-
-    impl PersonalityEval for MockPersonality {
-        fn evaluate(&self, _board: &Board, _ctx: &GameContext) -> i32 {
-            self.eval_value
-        }
-        fn weight(&self) -> f32 {
-            self.w
-        }
-        fn set_weight(&mut self, w: f32) {
-            self.w = w;
-        }
-        fn name(&self) -> &str {
-            self.n
-        }
-    }
-
-    #[test]
-    fn personality_score_sums_correctly() {
-        let board = Board::new();
-        let ctx = GameContext::new(); // Opening phase
-
-        let personalities: Vec<Box<dyn PersonalityEval>> = vec![
-            Box::new(MockPersonality { eval_value: 100, w: 1.0, n: "chaos" }),
-            Box::new(MockPersonality { eval_value: 50, w: 1.0, n: "romantic" }),
-            Box::new(MockPersonality { eval_value: 0, w: 1.0, n: "entropy" }),
-            Box::new(MockPersonality { eval_value: 0, w: 1.0, n: "asymmetry" }),
-            Box::new(MockPersonality { eval_value: 0, w: 1.0, n: "momentum" }),
-            Box::new(MockPersonality { eval_value: 0, w: 1.0, n: "zugzwang" }),
-        ];
-
-        let arc = GameArc::default_arc();
-        let score = personality_score(&board, &ctx, &personalities, &arc);
-
-        // Opening phase weights: [0.5, 1.2, 0.5, 0.8, 0.3, 0.1]
-        // Expected: 1.0 * 0.5 * 100 + 1.0 * 1.2 * 50 + 0 + 0 + 0 + 0 = 50 + 60 = 110
-        assert_eq!(score, 110);
-    }
-
-    #[test]
-    fn personality_score_with_zero_weights() {
-        let board = Board::new();
-        let ctx = GameContext::new();
-
-        let personalities: Vec<Box<dyn PersonalityEval>> = vec![
-            Box::new(MockPersonality { eval_value: 100, w: 0.0, n: "chaos" }),
-            Box::new(MockPersonality { eval_value: 100, w: 0.0, n: "romantic" }),
-            Box::new(MockPersonality { eval_value: 100, w: 0.0, n: "entropy" }),
-            Box::new(MockPersonality { eval_value: 100, w: 0.0, n: "asymmetry" }),
-            Box::new(MockPersonality { eval_value: 100, w: 0.0, n: "momentum" }),
-            Box::new(MockPersonality { eval_value: 100, w: 0.0, n: "zugzwang" }),
-        ];
-
-        let arc = GameArc::default_arc();
-        let score = personality_score(&board, &ctx, &personalities, &arc);
-        assert_eq!(score, 0);
-    }
 }

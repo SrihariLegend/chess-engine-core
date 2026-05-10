@@ -433,6 +433,7 @@ pub struct UndoInfo {
     pub halfmove_clock: u16,
     pub fullmove_number: u16,
     pub zobrist_hash: u64,
+    pub position_history: Vec<u64>,
 }
 
 // ─── FenError ─────────────────────────────────────────────────────────────────
@@ -892,6 +893,7 @@ impl Board {
             halfmove_clock: self.halfmove_clock,
             fullmove_number: self.fullmove_number,
             zobrist_hash: self.zobrist_hash,
+            position_history: self.position_history.clone(),
         });
 
         let from = mv.from as usize;
@@ -1091,8 +1093,8 @@ impl Board {
         self.fullmove_number = undo.fullmove_number;
         self.zobrist_hash = undo.zobrist_hash;
 
-        // Pop position from repetition history
-        self.position_history.pop();
+        // Restore position history from undo info
+        self.position_history = undo.position_history;
 
         // Recompute occupancy
         self.update_occupancy();
@@ -1111,6 +1113,7 @@ impl Board {
             halfmove_clock: self.halfmove_clock,
             fullmove_number: self.fullmove_number,
             zobrist_hash: self.zobrist_hash,
+            position_history: self.position_history.clone(),
         });
 
         // Clear en passant
@@ -2134,5 +2137,70 @@ mod tests {
         board.unmake_move(mv1);
 
         assert_eq!(board_snapshot(&board), snap);
+    }
+
+    #[test]
+    fn make_unmake_restores_position_history_after_pawn_move() {
+        let mut board = Board::new();
+
+        // Build up position_history with non-pawn, non-capture moves
+        // 1. Ng1-f3
+        let mv1 = Move::quiet(6, 21, Piece::Knight);
+        board.make_move(mv1);
+        // 2. Nb8-c6
+        let mv2 = Move::quiet(57, 42, Piece::Knight);
+        board.make_move(mv2);
+        // 3. Nb1-c3
+        let mv3 = Move::quiet(1, 18, Piece::Knight);
+        board.make_move(mv3);
+
+        // position_history should now have 4 entries (start + 3 moves)
+        assert_eq!(board.position_history.len(), 4);
+
+        let history_before = board.position_history.clone();
+        let board_snapshot_pre = board_snapshot(&board);
+
+        // 4. e2-e4 — a pawn move that clears position_history
+        let mv_pawn = Move::new(12, 28, Piece::Pawn, None, None, MoveFlags::DOUBLE_PUSH);
+        board.make_move(mv_pawn);
+        // After pawn move, history is cleared then pushed (just 1 entry)
+        assert_eq!(board.position_history.len(), 1);
+        assert!(board.position_history.len() < history_before.len());
+
+        // 5. Unmake the pawn move — history must be fully restored
+        board.unmake_move(mv_pawn);
+        assert_eq!(board.position_history, history_before,
+            "position_history must be restored after unmaking a pawn move");
+        assert_eq!(board_snapshot(&board), board_snapshot_pre,
+            "board state must be restored after unmaking a pawn move");
+    }
+
+    #[test]
+    fn make_unmake_restores_position_history_after_capture() {
+        // Set up a position where a capture is possible
+        let mut board =
+            Board::from_fen("rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 2")
+            .unwrap();
+
+        // 1. Knight move to build history
+        let mv1 = Move::quiet(6, 21, Piece::Knight); // Ng1-f3
+        board.make_move(mv1);
+
+        let history_before = board.position_history.clone();
+        let board_snapshot_pre = board_snapshot(&board);
+        let pre_len = history_before.len();
+        assert!(pre_len >= 2);
+
+        // 2. e4xd5 — a capture that clears position_history
+        let mv_cap = Move::new(28, 35, Piece::Pawn, Some(Piece::Pawn), None, MoveFlags::QUIET);
+        board.make_move(mv_cap);
+        assert_eq!(board.position_history.len(), 1);
+
+        // 3. Unmake the capture — history must be fully restored
+        board.unmake_move(mv_cap);
+        assert_eq!(board.position_history, history_before,
+            "position_history must be restored after unmaking a capture");
+        assert_eq!(board_snapshot(&board), board_snapshot_pre,
+            "board state must be restored after unmaking a capture");
     }
 }

@@ -283,7 +283,7 @@ proptest! {
         let empty_history = [[0i32; 64]; 12];
 
         // Order with no TT move, no killers, no history — only MVV-LVA matters for captures
-        order_moves(&mut moves, None, &no_killers, &empty_history);
+        order_moves(&mut moves, None, &no_killers, &empty_history, None);
 
         // All are captures, so they should be sorted by MVV-LVA score in non-increasing order
         for i in 0..moves.len() - 1 {
@@ -340,7 +340,7 @@ proptest! {
         let empty_history = [[0i32; 64]; 12];
 
         let mut moves = vec![quiet_move, capture_move, killer_move, tt_move];
-        order_moves(&mut moves, Some(tt_move), &killers, &empty_history);
+        order_moves(&mut moves, Some(tt_move), &killers, &empty_history, None);
 
         // TT move should be first
         prop_assert_eq!(moves[0], tt_move,
