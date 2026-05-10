@@ -1,42 +1,59 @@
-name: Release Automation
+name: Build & Upload Release Binaries
 
 on:
   release:
-    types:
-      - created  # Trigger only when a release is created
+    types: [published]
+
+permissions:
+  contents: write
 
 jobs:
-  build-and-upload:
-    runs-on: ubuntu-latest
-
+  build:
     strategy:
+      fail-fast: false
       matrix:
-        platform: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            asset_suffix: linux
+            exe_suffix: ""
+          - os: macos-latest
+            asset_suffix: macos
+            exe_suffix: ""
+          - os: windows-latest
+            asset_suffix: windows
+            exe_suffix: ".exe"
+
+    runs-on: ${{ matrix.os }}
 
     steps:
-    # Checkout repository
-    - name: Checkout code
-      uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-    # Install Rust
-    - name: Install Rust
-      uses: actions-rs/toolchain@v1
-      with:
-        profile: minimal
-        toolchain: stable
-        override: true
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
 
-    # Build the project
-    - name: Build project
-      run: cargo build --release
+      - name: Build (release)
+        run: cargo build --release
 
-    # Upload binaries
-    - name: Upload release asset
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ github.event.release.upload_url }}
-        asset_path: target/release/chess-engine-core
-        asset_name: chess-engine-core-${{ matrix.platform }}
-        asset_content_type: application/octet-stream
+      # CHANGE THIS if your produced binary name is different
+      - name: Package binary
+        shell: bash
+        run: |
+          set -euxo pipefail
+          BIN_NAME="chess-engine-core"
+          BIN_PATH="target/release/${BIN_NAME}${{ matrix.exe_suffix }}"
+
+          if [ ! -f "$BIN_PATH" ]; then
+            echo "Binary not found at $BIN_PATH"
+            echo "Available files in target/release:"
+            ls -la target/release || true
+            exit 1
+          fi
+
+          ASSET="${BIN_NAME}-${{ github.ref_name }}-${{ matrix.asset_suffix }}.tar.gz"
+          tar -czf "$ASSET" -C "target/release" "${BIN_NAME}${{ matrix.exe_suffix }}"
+          echo "ASSET=$ASSET" >> $GITHUB_ENV
+
+      - name: Upload asset to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ASSET }}
