@@ -1,0 +1,42 @@
+name: Release Automation
+
+on:
+  release:
+    types:
+      - created  # Trigger only when a release is created
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        platform: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+    # Checkout repository
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    # Install Rust
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: stable
+        override: true
+
+    # Build the project
+    - name: Build project
+      run: cargo build --release
+
+    # Upload binaries
+    - name: Upload release asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: target/release/chess-engine-core
+        asset_name: chess-engine-core-${{ matrix.platform }}
+        asset_content_type: application/octet-stream
