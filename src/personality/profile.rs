@@ -11,7 +11,7 @@
 // via the AXIS_SENSOR_BLEND table. The combined signal feeds into evaluation,
 // move ordering, and search behavior channels.
 
-use crate::board::{Board, Move};
+use crate::board::{Board, Move, Piece};
 use crate::personality::{PersonalityEval, GameContext, GamePhase, CHAOS, ROMANTIC, ENTROPY, ASYMMETRY, MOMENTUM, ZUGZWANG};
 
 /// The maximum centipawn contribution from the personality evaluation channel.
@@ -79,22 +79,22 @@ impl Profile {
 // ─── Player Profiles ──────────────────────────────────────────────────────────
 
 pub const TAL: Profile = Profile {
-    name: "Tal", activity: 0.8, complexity: 0.7, risk: 0.8, simplification: -0.4, prophylaxis: -0.6,
+    name: "Tal", activity: 0.9, complexity: 0.7, risk: 0.8, simplification: -0.4, prophylaxis: -0.6,
 };
 pub const PETROSIAN: Profile = Profile {
     name: "Petrosian", activity: -0.5, complexity: -0.6, risk: -0.7, simplification: 0.6, prophylaxis: 0.8,
 };
 pub const KARPOV: Profile = Profile {
-    name: "Karpov", activity: 0.1, complexity: 0.0, risk: -0.4, simplification: 0.7, prophylaxis: 0.7,
+    name: "Karpov", activity: 0.1, complexity: 0.0, risk: -0.2, simplification: 0.7, prophylaxis: 0.7,
 };
 pub const CAPABLANCA: Profile = Profile {
-    name: "Capablanca", activity: 0.2, complexity: -0.5, risk: 0.1, simplification: 0.8, prophylaxis: 0.3,
+    name: "Capablanca", activity: 0.2, complexity: -0.3, risk: 0.1, simplification: 0.8, prophylaxis: 0.3,
 };
 pub const MORPHY: Profile = Profile {
-    name: "Morphy", activity: 0.9, complexity: 0.4, risk: 0.7, simplification: 0.3, prophylaxis: -0.5,
+    name: "Morphy", activity: 0.9, complexity: 0.4, risk: 0.7, simplification: 0.0, prophylaxis: -0.5,
 };
 pub const ALEKHINE: Profile = Profile {
-    name: "Alekhine", activity: 0.7, complexity: 0.8, risk: 0.5, simplification: 0.1, prophylaxis: 0.0,
+    name: "Alekhine", activity: 0.7, complexity: 0.8, risk: 0.3, simplification: 0.1, prophylaxis: 0.3,
 };
 pub const LASKER: Profile = Profile {
     name: "Lasker", activity: 0.0, complexity: 0.0, risk: 0.0, simplification: 0.0, prophylaxis: 0.0,
@@ -173,32 +173,102 @@ pub fn compute_channel1(
     (total * scale).round() as i32
 }
 
+// ─── Signal Blend Tables ──────────────────────────────────────────────────────
+
+/// Maps each of the 5 move-level signals to a weighted blend of the 5 behavioral axes.
+/// Each row is [(axis_index, coefficient), ...] where axis order is [activity, complexity, risk, simplification, prophylaxis].
+/// Used to compute per-profile preferences on move signals via dot product.
+static SIGNAL_BLENDS: [[(usize, f32); 5]; 5] = [
+    // simplify_seek: prefers trading — high simplification, low complexity/risk
+    [(0, 0.0), (1, -0.7), (2, -0.3), (3, 1.0), (4, 0.5)],
+    // complexity_seek: avoids simplification — high complexity, low simplification
+    [(0, 0.3), (1, 1.0), (2, 0.7), (3, -0.7), (4, -0.3)],
+    // develop: prefers getting pieces off the back rank — high activity
+    [(0, 0.8), (1, 0.2), (2, 0.0), (3, 0.0), (4, -0.5)],
+    // attack: prefers moves toward opponent king — high activity, high risk
+    [(0, 0.7), (1, 0.5), (2, 0.5), (3, -0.5), (4, -0.7)],
+    // safety: prefers consolidating, defensive moves — high prophylaxis, low activity/risk
+    [(0, -0.7), (1, -0.5), (2, -0.7), (3, 0.5), (4, 0.8)],
+];
+
+/// Compute a profile's preference for a given signal via dot product of axes with blend weights.
+fn signal_pref(axes: &[f32; 5], signal_idx: usize) -> f32 {
+    SIGNAL_BLENDS[signal_idx].iter()
+        .map(|(axis_idx, coeff)| axes[*axis_idx] * coeff)
+        .sum()
+}
+
 // ─── Channel 2: Move Ordering Bias ────────────────────────────────────────────
 
 /// Maximum personality bonus added to a move's ordering score.
-/// Kept well below TT_MOVE_SCORE (1M), CAPTURE_BASE_SCORE (500K), KILLER_SCORE (400K)
-/// so personality only affects ordering within the same objective category.
 const MAX_MOVE_BONUS: i32 = 3000;
 
-/// Compute a personality-based bonus for move ordering.
+/// Compute a personality-based bonus for move ordering using semantic move signals.
 /// Positive bonus = examine this move earlier (preferred by this style).
-/// Bonus is capped at ±3000, well below TT (1M), capture (500K), and killer (400K)
-/// scores, so personality only tilts ordering within the same objective category.
-pub fn personality_move_bonus(mv: &Move, profile: &Profile) -> i32 {
+pub fn personality_move_bonus(mv: &Move, board: &Board, profile: &Profile) -> i32 {
+    let axes = profile.axes();
     let mut bonus = 0f32;
 
-    // Activity: prefer captures and promotions (aggressive, tactical play)
-    if mv.is_capture() || mv.is_promotion() {
-        bonus += profile.activity * 800.0;
+    let is_capture = mv.is_capture();
+    let is_promotion = mv.is_promotion();
+
+    // ── Simplifying trade detection ──
+    // A move is "simplifying" if it's a capture where we trade equal or better material,
+    // or any queen trade. High-simplification profiles (Capablanca, Petrosian) prefer these.
+    // High-complexity profiles (Tal, Alekhine) avoid them.
+    if is_capture {
+        if let Some(victim) = mv.captured {
+            let is_simplifying = piece_value_simple(victim) >= piece_value_simple(mv.piece);
+            if is_simplifying {
+                // simplify_seek signal: positive = seek trades, negative = avoid them
+                bonus += signal_pref(&axes, 0) * 800.0;
+            } else {
+                // Winning capture — all aggressive profiles like these
+                bonus += signal_pref(&axes, 2) * 600.0; // attack signal
+            }
+        }
     }
 
-    // Non-captures: prophylaxis prefers restricting moves, safety prefers solid
-    if !mv.is_capture() && !mv.is_promotion() {
-        bonus += profile.prophylaxis * 300.0;
-        bonus += (-profile.risk).max(0.0) * 500.0;
+    if is_promotion {
+        bonus += signal_pref(&axes, 2) * 400.0; // attack signal
+    }
+
+    // ── Development detection ──
+    // A move is "developing" if the piece starts on its home rank (back rank for its color)
+    // and moves forward. Morphy in particular should get a strong bonus for this.
+    if !is_capture && !is_promotion {
+        let from_rank = mv.from / 8;
+        let to_rank = mv.to / 8;
+        let piece = mv.piece;
+        let is_back_rank_piece = matches!(piece, Piece::Knight | Piece::Bishop | Piece::Queen);
+        // White back rank = 0, black back rank = 7
+        let on_back_rank = (from_rank == 0) || (from_rank == 7);
+        let moving_forward = (from_rank < to_rank) || (from_rank == 7 && to_rank < 7);
+        if on_back_rank && moving_forward && is_back_rank_piece {
+            bonus += signal_pref(&axes, 2) * 1000.0; // develop signal
+        }
+    }
+
+    // ── Attacking / safety direction for quiet moves ──
+    if !is_capture && !is_promotion {
+        // Attack signal: positive for Tal/Morphy, negative for Petrosian
+        bonus += signal_pref(&axes, 3) * 400.0; // attack
+        // Safety signal: positive for Petrosian/Karpov, negative for Tal
+        bonus += signal_pref(&axes, 4) * 400.0; // safety
     }
 
     (bonus.round() as i32).clamp(-MAX_MOVE_BONUS, MAX_MOVE_BONUS)
+}
+
+/// Piece value for trade classification (simplified: pawn=1, minor=3, rook=5, queen=9).
+fn piece_value_simple(piece: Piece) -> i32 {
+    match piece {
+        Piece::Pawn => 1,
+        Piece::Knight | Piece::Bishop => 3,
+        Piece::Rook => 5,
+        Piece::Queen => 9,
+        Piece::King => 99,
+    }
 }
 
 // ─── Channel 3: Search Behavior ──────────────────────────────────────────────
@@ -212,6 +282,8 @@ pub struct SearchStyleParams {
     pub null_move_reduction_bias: i32,
     /// Adjustment to late move reduction (higher = reduce quiet moves more).
     pub lmr_reduction_bias: i32,
+    /// Complexity-driven LMR adjustment: high complexity reduces LMR less.
+    pub lmr_complexity_bias: i32,
 }
 
 impl SearchStyleParams {
@@ -220,6 +292,7 @@ impl SearchStyleParams {
             check_extension_extra: 0,
             null_move_reduction_bias: 0,
             lmr_reduction_bias: 0,
+            lmr_complexity_bias: 0,
         }
     }
 }
@@ -229,12 +302,11 @@ impl Profile {
     pub fn to_search_params(&self, intensity: f32) -> SearchStyleParams {
         let intensity = intensity.clamp(0.0, 1.0);
         SearchStyleParams {
-            // Risk-driven: aggressive styles extend checks more to find tactics
             check_extension_extra: ((self.risk.max(0.0) * intensity).round() as i32).max(0),
-            // Aggressive = prune more aggressively (higher reduction on non-forcing lines)
             null_move_reduction_bias: ((self.risk * intensity * 2.0).round() as i32).clamp(0, 2),
-            // Same for LMR: risky styles reduce quiet moves more
             lmr_reduction_bias: ((self.risk * intensity).round() as i32).clamp(-1, 1),
+            // High complexity = reduce LMR less (search tactical lines deeper)
+            lmr_complexity_bias: ((-self.complexity.max(0.0) * intensity).round() as i32).clamp(-1, 0),
         }
     }
 }
@@ -270,9 +342,9 @@ mod tests {
 
     #[test]
     fn profile_axes_match_definitions() {
-        assert_eq!(TAL.axes(), [0.8, 0.7, 0.8, -0.4, -0.6]);
+        assert_eq!(TAL.axes(), [0.9, 0.7, 0.8, -0.4, -0.6]);
         assert_eq!(PETROSIAN.axes(), [-0.5, -0.6, -0.7, 0.6, 0.8]);
-        assert_eq!(CAPABLANCA.axes(), [0.2, -0.5, 0.1, 0.8, 0.3]);
+        assert_eq!(CAPABLANCA.axes(), [0.2, -0.3, 0.1, 0.8, 0.3]);
         assert_eq!(LASKER.axes(), [0.0, 0.0, 0.0, 0.0, 0.0]);
     }
 

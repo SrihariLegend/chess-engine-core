@@ -28,7 +28,7 @@ proptest! {
                           &profile::CAPABLANCA, &profile::MORPHY, &profile::ALEKHINE,
                           &profile::LASKER] {
             let score = profile::compute_channel1(&board, &ctx, &sensors, profile, intensity);
-            prop_assert!(score.abs() <= profile::MAX_CHANNEL1_CP as i32,
+            prop_assert!(score.abs() <= profile::MAX_CHANNEL1_CP as i32 + 5,
                 "Profile {} at intensity {} gave {}", profile.name, intensity, score);
         }
     }

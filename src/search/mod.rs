@@ -660,8 +660,10 @@ impl SearchState {
 
         // Order moves
         let killers = *self.killer_moves.get(ply as usize);
+        let board_ref = &*board;
+        let active_profile = &self.active_profile;
         let style_bonus = |mv: &Move| -> i32 {
-            profile::personality_move_bonus(mv, &self.active_profile)
+            profile::personality_move_bonus(mv, board_ref, active_profile)
         };
         order_moves(
             &mut moves,
@@ -713,7 +715,8 @@ impl SearchState {
             } else if can_reduce {
                 // LMR: logarithmic reduction based on depth and move index
                 let r = ((depth as f32).ln() * (move_idx as f32).ln() / 2.0) as i32;
-                let reduction = (r + self.personality_search_params.lmr_reduction_bias).max(1);
+                let reduction = (r + self.personality_search_params.lmr_reduction_bias
+                    + self.personality_search_params.lmr_complexity_bias).max(1);
                 let reduced_depth = (depth - 1 - reduction).max(1);
 
                 // Zero-window search at reduced depth
