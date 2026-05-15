@@ -1,10 +1,7 @@
 // Chaos Theory personality: rewards complexity, penalizes simplification
 
 use crate::board::Board;
-use crate::personality::{GameContext, PersonalityEval};
-
-/// Bonus multiplier per total legal move (both sides).
-const COMPLEXITY_FACTOR: i32 = 1;
+use crate::personality::{squash_to_cp, GameContext, PersonalityEval};
 
 /// Simplification threshold: penalize when total piece count drops below this.
 const SIMPLIFICATION_THRESHOLD: u32 = 10;
@@ -25,15 +22,14 @@ impl ChaosTheory {
 impl PersonalityEval for ChaosTheory {
     fn evaluate(&self, board: &Board, ctx: &GameContext) -> i32 {
         let total_moves = ctx.side_to_move_moves + ctx.opponent_moves;
-        let mut score = (total_moves as i32) * COMPLEXITY_FACTOR;
+        let mut score = total_moves as f32;
 
-        // Penalize simplified positions
         let total_pieces = board.all_occupancy.count_ones();
         if total_pieces < SIMPLIFICATION_THRESHOLD {
-            score += SIMPLIFICATION_PENALTY;
+            score += SIMPLIFICATION_PENALTY as f32;
         }
 
-        score
+        squash_to_cp(score, 60.0)
     }
 
     fn weight(&self) -> f32 {
@@ -71,8 +67,8 @@ mod tests {
         let ctx = make_ctx(20, 20);
         let ct = ChaosTheory::new();
         let score = ct.evaluate(&board, &ctx);
-        // 40 total moves * 1 = 40
-        assert_eq!(score, 40);
+        assert!(score > 0, "More moves should give positive score, got {}", score);
+        assert!(score <= 100, "Score should be in [-100, 100], got {}", score);
     }
 
     #[test]
@@ -92,8 +88,9 @@ mod tests {
         let ctx = make_ctx(5, 5);
         let ct = ChaosTheory::new();
         let score = ct.evaluate(&board, &ctx);
-        // 10 * 1 + (-30) = -20
-        assert_eq!(score, -20);
+        // Penalty applied: moves contribute little, simplification penalty dominates
+        assert!(score < 0, "Below threshold should give negative score, got {}", score);
+        assert!(score >= -100, "Score should be in [-100, 100], got {}", score);
     }
 
     #[test]
@@ -102,7 +99,7 @@ mod tests {
         let ctx = make_ctx(0, 0);
         let ct = ChaosTheory::new();
         let score = ct.evaluate(&board, &ctx);
-        assert_eq!(score, 0); // 0 moves * 2, no penalty
+        assert!(score.abs() < 5, "Zero moves and above threshold should be near 0, got {}", score);
     }
 
     #[test]

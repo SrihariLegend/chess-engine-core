@@ -6,7 +6,8 @@ use std::time::Instant;
 use crate::board::{Board, Color, Move, Piece};
 use crate::eval::{self, piece_value, MATE_SCORE};
 use crate::movegen::{self, MoveGenResult};
-use crate::personality::{self, GameArc, GameContext, PersonalityEval};
+use crate::personality::{GameContext, PersonalityEval};
+use crate::personality::profile::{self, Profile, SearchStyleParams};
 use crate::search::tt::{NodeType, TTEntry, TranspositionTable};
 
 /// Maximum search ply depth.
@@ -169,15 +170,19 @@ const KILLER_SCORE: i32 = 400_000;
 /// 2. Captures by MVV-LVA score
 /// 3. Killer moves (2 per ply)
 /// 4. Quiet moves by history heuristic score
+/// An optional personality bonus tilts ordering within same category.
 pub fn order_moves(
     moves: &mut Vec<Move>,
     tt_move: Option<Move>,
     killers: &[Option<Move>; 2],
     history: &[[i32; 64]; 12],
+    personality_bonus: Option<&dyn Fn(&Move) -> i32>,
 ) {
     moves.sort_by(|a, b| {
-        let score_a = move_score(a, &tt_move, killers, history);
-        let score_b = move_score(b, &tt_move, killers, history);
+        let score_a = move_score(a, &tt_move, killers, history)
+            + personality_bonus.map(|f| f(a)).unwrap_or(0);
+        let score_b = move_score(b, &tt_move, killers, history)
+            + personality_bonus.map(|f| f(b)).unwrap_or(0);
         score_b.cmp(&score_a) // descending order (highest first)
     });
 }
@@ -321,7 +326,9 @@ pub struct SearchState {
     pub stop: AtomicBool,
     // Personality system
     pub personalities: Vec<Box<dyn PersonalityEval>>,
-    pub game_arc: GameArc,
+    pub active_profile: Profile,
+    pub style_intensity: f32,
+    pub personality_search_params: SearchStyleParams,
     pub game_context: GameContext,
     // Internal time tracking
     start_time: Option<Instant>,
@@ -353,71 +360,15 @@ impl SearchState {
             nodes_searched: AtomicU64::new(0),
             stop: AtomicBool::new(false),
             personalities,
-            game_arc: GameArc::default_arc(),
+            active_profile: profile::LASKER.clone(),
+            style_intensity: 0.3,
+            personality_search_params: profile::LASKER.to_search_params(0.3),
             game_context: GameContext::new(),
             start_time: None,
             allocated_time_ms: u64::MAX,
             threads: 1,
             contempt: 50,
         }
-    }
-
-    /// Apply personality preset by setting weights on all personalities.
-    pub fn apply_personality(&mut self, name: &str) {
-        match name {
-            "aggressive" => {
-                // High chaos (complexity), high romantic (activity), high momentum
-                if let Some(p) = self.personalities.get_mut(0) { p.set_weight(2.0); } // ChaosTheory
-                if let Some(p) = self.personalities.get_mut(1) { p.set_weight(2.0); } // Romantic
-                if let Some(p) = self.personalities.get_mut(2) { p.set_weight(0.5); } // EntropyMaximizer
-                if let Some(p) = self.personalities.get_mut(3) { p.set_weight(0.5); } // AsymmetryAddict
-                if let Some(p) = self.personalities.get_mut(4) { p.set_weight(2.0); } // MomentumTracker
-                if let Some(p) = self.personalities.get_mut(5) { p.set_weight(0.5); } // ZugzwangHunter
-            }
-            "defensive" => {
-                // High zugzwang, high entropy (favors equal moves), low chaos
-                if let Some(p) = self.personalities.get_mut(0) { p.set_weight(0.5); } // ChaosTheory
-                if let Some(p) = self.personalities.get_mut(1) { p.set_weight(0.5); } // Romantic
-                if let Some(p) = self.personalities.get_mut(2) { p.set_weight(1.5); } // EntropyMaximizer
-                if let Some(p) = self.personalities.get_mut(3) { p.set_weight(1.5); } // AsymmetryAddict
-                if let Some(p) = self.personalities.get_mut(4) { p.set_weight(0.5); } // MomentumTracker
-                if let Some(p) = self.personalities.get_mut(5) { p.set_weight(2.0); } // ZugzwangHunter
-            }
-            "positional" => {
-                // High asymmetry, high entropy, low chaos, low romantic
-                if let Some(p) = self.personalities.get_mut(0) { p.set_weight(0.5); } // ChaosTheory
-                if let Some(p) = self.personalities.get_mut(1) { p.set_weight(0.5); } // Romantic
-                if let Some(p) = self.personalities.get_mut(2) { p.set_weight(2.0); } // EntropyMaximizer
-                if let Some(p) = self.personalities.get_mut(3) { p.set_weight(2.0); } // AsymmetryAddict
-                if let Some(p) = self.personalities.get_mut(4) { p.set_weight(1.0); } // MomentumTracker
-                if let Some(p) = self.personalities.get_mut(5) { p.set_weight(1.0); } // ZugzwangHunter
-            }
-            "tactical" => {
-                // High chaos, high romantic, low entropy
-                if let Some(p) = self.personalities.get_mut(0) { p.set_weight(2.0); } // ChaosTheory
-                if let Some(p) = self.personalities.get_mut(1) { p.set_weight(2.0); } // Romantic
-                if let Some(p) = self.personalities.get_mut(2) { p.set_weight(0.5); } // EntropyMaximizer
-                if let Some(p) = self.personalities.get_mut(3) { p.set_weight(1.0); } // AsymmetryAddict
-                if let Some(p) = self.personalities.get_mut(4) { p.set_weight(1.0); } // MomentumTracker
-                if let Some(p) = self.personalities.get_mut(5) { p.set_weight(0.5); } // ZugzwangHunter
-            }
-            _ => { // balanced - reset all to 1.0
-                for p in &mut self.personalities {
-                    p.set_weight(1.0);
-                }
-            }
-        }
-    }
-
-    /// Update personality weights dynamically based on board state.
-    /// Called before each search when the "dynamic" preset is active.
-    pub fn update_dynamic_weights(&mut self, board: &Board) {
-        personality::update_dynamic_weights(
-            board,
-            &self.game_context,
-            &self.game_arc,
-            &mut self.personalities,
-        );
     }
 
     /// Main entry point: search the position and return the best move.
@@ -433,10 +384,14 @@ impl SearchState {
         self.allocated_time_ms = allocate_time(&params, board.side_to_move);
         self.start_time = Some(Instant::now());
 
+        // Adapt profile for dynamic styles
+        if self.active_profile.adaptive {
+            self.active_profile = self.active_profile.adapt(&self.game_context, board);
+            self.personality_search_params = self.active_profile.to_search_params(self.style_intensity);
+        }
+
         let max_depth = params.max_depth.unwrap_or(64).min(MAX_PLY as u32);
 
-        // Note: Multi-threading support reserved for future implementation
-        // The threads option is parsed but search remains single-threaded
         self.iterative_deepening(board, max_depth)
     }
 
@@ -444,13 +399,22 @@ impl SearchState {
     /// Returns score from side-to-move's perspective.
     pub fn evaluate_with_personality(&self, board: &Board) -> i32 {
         let base = eval::evaluate(board);
-        let personality = personality::personality_score(
+        let personality = profile::compute_channel1(
             board,
             &self.game_context,
             &self.personalities,
-            &self.game_arc,
+            &self.active_profile,
+            self.style_intensity,
         );
         base + personality
+    }
+
+    /// Set the active playing style profile.
+    pub fn set_profile(&mut self, name: &str) {
+        if let Some(p) = profile::profile_by_name(name) {
+            self.active_profile = p.clone();
+            self.personality_search_params = p.to_search_params(self.style_intensity);
+        }
     }
 
     /// Iterative deepening loop: search depth 1..N, returning best move from
@@ -510,8 +474,9 @@ impl SearchState {
                 best_move = Some(mv);
             }
 
-            // Update game context with this iteration's evaluation
-            self.game_context.push_eval(score);
+            // Update game context with this iteration's base evaluation
+            // (personality component excluded to break momentum feedback loop)
+            self.game_context.push_eval(eval::evaluate(board));
             self.game_context.update_phase();
 
             // Report UCI info
@@ -579,8 +544,12 @@ impl SearchState {
         let is_pv_node = beta - alpha > 1;
         let in_check = board.is_in_check(board.side_to_move);
 
-        // Check extension: extend search by 1 ply when in check
-        let mut depth = if in_check { depth + 1 } else { depth };
+        // Check extension: extend search by 1 ply when in check (+ style bonus)
+        let mut depth = if in_check {
+            depth + 1 + self.personality_search_params.check_extension_extra
+        } else {
+            depth
+        };
 
         // TT probe - skip cutoffs if position has occurred before (path-dependent)
         let hash = board.zobrist_hash;
@@ -658,7 +627,8 @@ impl SearchState {
             if has_non_pawn_material != 0 {
                 // Make null move (just flip side to move)
                 board.make_null_move();
-                let r = if depth >= 6 { 3 } else { 2 }; // adaptive reduction
+                let base_r = if depth >= 6 { 3 } else { 2 };
+                let r = (base_r + self.personality_search_params.null_move_reduction_bias).max(1);
                 let mut null_pv = Vec::new();
                 let null_score = -self.alpha_beta(board, depth - 1 - r, -beta, -beta + 1, ply + 1, &mut null_pv);
                 board.unmake_null_move();
@@ -690,11 +660,17 @@ impl SearchState {
 
         // Order moves
         let killers = *self.killer_moves.get(ply as usize);
+        let board_ref = &*board;
+        let active_profile = &self.active_profile;
+        let style_bonus = |mv: &Move| -> i32 {
+            profile::personality_move_bonus(mv, board_ref, active_profile)
+        };
         order_moves(
             &mut moves,
             tt_move,
             &killers,
             &self.history_table.table,
+            Some(&style_bonus),
         );
 
         let mut best_score = -INF;
@@ -739,7 +715,8 @@ impl SearchState {
             } else if can_reduce {
                 // LMR: logarithmic reduction based on depth and move index
                 let r = ((depth as f32).ln() * (move_idx as f32).ln() / 2.0) as i32;
-                let reduction = r.max(1);
+                let reduction = (r + self.personality_search_params.lmr_reduction_bias
+                    + self.personality_search_params.lmr_complexity_bias).max(1);
                 let reduced_depth = (depth - 1 - reduction).max(1);
 
                 // Zero-window search at reduced depth
@@ -879,7 +856,7 @@ impl SearchState {
         let mut moves = moves;
         let no_killers: [Option<Move>; 2] = [None; 2];
         let empty_history = [[0i32; 64]; 12];
-        order_moves(&mut moves, None, &no_killers, &empty_history);
+        order_moves(&mut moves, None, &no_killers, &empty_history, None);
 
         for mv in &moves {
             // Delta pruning per-move (skip if in check — must search all evasions)

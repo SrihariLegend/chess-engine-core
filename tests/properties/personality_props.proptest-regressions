@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc c48ef83bcc45129ae2a67868fcc4b2cd0b0f14753eed1a15d5d205f15dfb8844 # shrinks to our_moves = 0, their_moves = 0
+cc af8492239cd5052957646a9e352c5d713c55801fd8b424f50252b850adc82460 # shrinks to intensity = 0.9762107
