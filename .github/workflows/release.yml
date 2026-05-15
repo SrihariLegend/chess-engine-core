@@ -1,4 +1,4 @@
-name: Build & Upload Release Binaries
+name: Build and Upload Release Binaries
 
 on:
   release:
@@ -15,13 +15,12 @@ jobs:
         include:
           - os: ubuntu-latest
             asset_suffix: linux
-            exe_suffix: ""
-          - os: macos-latest
-            asset_suffix: macos
-            exe_suffix: ""
+            archive_ext: tar.gz
+            binary_path: target/release/chess-engine-core
           - os: windows-latest
             asset_suffix: windows
-            exe_suffix: ".exe"
+            archive_ext: zip
+            binary_path: target/release/chess-engine-core.exe
 
     runs-on: ${{ matrix.os }}
 
@@ -32,26 +31,28 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build (release)
-        run: cargo build --release
+        run: cargo build --release --locked
 
-      # CHANGE THIS if your produced binary name is different
-      - name: Package binary
+      - name: Package Linux binary
+        if: matrix.os == 'ubuntu-latest'
         shell: bash
         run: |
           set -euxo pipefail
-          BIN_NAME="chess-engine-core"
-          BIN_PATH="target/release/${BIN_NAME}${{ matrix.exe_suffix }}"
-
-          if [ ! -f "$BIN_PATH" ]; then
-            echo "Binary not found at $BIN_PATH"
-            echo "Available files in target/release:"
-            ls -la target/release || true
-            exit 1
-          fi
-
-          ASSET="${BIN_NAME}-${{ github.ref_name }}-${{ matrix.asset_suffix }}.tar.gz"
-          tar -czf "$ASSET" -C "target/release" "${BIN_NAME}${{ matrix.exe_suffix }}"
+          mkdir -p dist
+          cp "${{ matrix.binary_path }}" dist/
+          ASSET="dist/chess-engine-core-${{ github.ref_name }}-${{ matrix.asset_suffix }}.${{ matrix.archive_ext }}"
+          tar -czf "$ASSET" -C dist chess-engine-core
           echo "ASSET=$ASSET" >> $GITHUB_ENV
+
+      - name: Package Windows binary
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item "${{ matrix.binary_path }}" dist/
+          $asset = "dist/chess-engine-core-${{ github.ref_name }}-${{ matrix.asset_suffix }}.${{ matrix.archive_ext }}"
+          Compress-Archive -Path "dist/chess-engine-core.exe" -DestinationPath $asset -Force
+          "ASSET=$asset" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Upload asset to GitHub Release
         uses: softprops/action-gh-release@v2
