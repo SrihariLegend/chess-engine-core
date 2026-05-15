@@ -384,8 +384,8 @@ impl SearchState {
         self.allocated_time_ms = allocate_time(&params, board.side_to_move);
         self.start_time = Some(Instant::now());
 
-        // Adapt profile for dynamic styles (Lasker)
-        if self.active_profile.name == "Lasker" {
+        // Adapt profile for dynamic styles
+        if self.active_profile.adaptive {
             self.active_profile = self.active_profile.adapt(&self.game_context, board);
             self.personality_search_params = self.active_profile.to_search_params(self.style_intensity);
         }

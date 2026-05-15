@@ -309,6 +309,8 @@ impl UciHandler {
             "styleprofile" => {
                 if crate::personality::profile::profile_by_name(&value_str.to_lowercase()).is_some() {
                     self.options.style_profile = value_str.to_lowercase();
+                } else {
+                    println!("info string Invalid profile name '{}'. Valid profiles: tal, petrosian, karpov, capablanca, morphy, alekhine, lasker", value_str);
                 }
             }
             "styleintensity" => {

@@ -27,6 +27,7 @@ pub struct Profile {
     pub risk: f32,
     pub simplification: f32,
     pub prophylaxis: f32,
+    pub adaptive: bool,
 }
 
 impl Profile {
@@ -34,9 +35,9 @@ impl Profile {
         [self.activity, self.complexity, self.risk, self.simplification, self.prophylaxis]
     }
 
-    /// Adapt axis values based on game context. Only meaningful for Lasker profile.
+    /// Adapt axis values based on game context. Only meaningful for adaptive profiles.
     pub fn adapt(&self, ctx: &GameContext, board: &Board) -> Profile {
-        if self.name != "Lasker" {
+        if !self.adaptive {
             return self.clone();
         }
 
@@ -79,25 +80,25 @@ impl Profile {
 // ─── Player Profiles ──────────────────────────────────────────────────────────
 
 pub const TAL: Profile = Profile {
-    name: "Tal", activity: 0.9, complexity: 0.7, risk: 0.8, simplification: -0.4, prophylaxis: -0.6,
+    name: "Tal", activity: 0.9, complexity: 0.7, risk: 0.8, simplification: -0.4, prophylaxis: -0.6, adaptive: false,
 };
 pub const PETROSIAN: Profile = Profile {
-    name: "Petrosian", activity: -0.5, complexity: -0.6, risk: -0.7, simplification: 0.6, prophylaxis: 0.8,
+    name: "Petrosian", activity: -0.5, complexity: -0.6, risk: -0.7, simplification: 0.6, prophylaxis: 0.8, adaptive: false,
 };
 pub const KARPOV: Profile = Profile {
-    name: "Karpov", activity: 0.1, complexity: 0.0, risk: -0.2, simplification: 0.7, prophylaxis: 0.7,
+    name: "Karpov", activity: 0.1, complexity: 0.0, risk: -0.2, simplification: 0.7, prophylaxis: 0.7, adaptive: false,
 };
 pub const CAPABLANCA: Profile = Profile {
-    name: "Capablanca", activity: 0.2, complexity: -0.3, risk: 0.1, simplification: 0.8, prophylaxis: 0.3,
+    name: "Capablanca", activity: 0.2, complexity: -0.3, risk: 0.1, simplification: 0.8, prophylaxis: 0.3, adaptive: false,
 };
 pub const MORPHY: Profile = Profile {
-    name: "Morphy", activity: 0.9, complexity: 0.4, risk: 0.7, simplification: 0.0, prophylaxis: -0.5,
+    name: "Morphy", activity: 0.9, complexity: 0.4, risk: 0.7, simplification: 0.0, prophylaxis: -0.5, adaptive: false,
 };
 pub const ALEKHINE: Profile = Profile {
-    name: "Alekhine", activity: 0.7, complexity: 0.8, risk: 0.3, simplification: 0.1, prophylaxis: 0.3,
+    name: "Alekhine", activity: 0.7, complexity: 0.8, risk: 0.3, simplification: 0.1, prophylaxis: 0.3, adaptive: false,
 };
 pub const LASKER: Profile = Profile {
-    name: "Lasker", activity: 0.0, complexity: 0.0, risk: 0.0, simplification: 0.0, prophylaxis: 0.0,
+    name: "Lasker", activity: 0.0, complexity: 0.0, risk: 0.0, simplification: 0.0, prophylaxis: 0.0, adaptive: true,
 };
 
 // ─── Profile Lookup ───────────────────────────────────────────────────────────
