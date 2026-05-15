@@ -241,10 +241,13 @@ pub fn personality_move_bonus(mv: &Move, board: &Board, profile: &Profile) -> i3
         let to_rank = mv.to / 8;
         let piece = mv.piece;
         let is_back_rank_piece = matches!(piece, Piece::Knight | Piece::Bishop | Piece::Queen);
-        // White back rank = 0, black back rank = 7
-        let on_back_rank = (from_rank == 0) || (from_rank == 7);
-        let moving_forward = (from_rank < to_rank) || (from_rank == 7 && to_rank < 7);
-        if on_back_rank && moving_forward && is_back_rank_piece {
+        let is_white_to_move = board.side_to_move().is_white();
+        let is_developing_move = if is_white_to_move {
+            from_rank == 0 && to_rank > from_rank
+        } else {
+            from_rank == 7 && to_rank < from_rank
+        };
+        if is_back_rank_piece && is_developing_move {
             bonus += signal_pref(&axes, 2) * 1000.0; // develop signal
         }
     }
