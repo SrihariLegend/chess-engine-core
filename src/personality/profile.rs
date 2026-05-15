@@ -11,7 +11,7 @@
 // via the AXIS_SENSOR_BLEND table. The combined signal feeds into evaluation,
 // move ordering, and search behavior channels.
 
-use crate::board::{Board, Move, Piece};
+use crate::board::{Board, Color, Move, Piece};
 use crate::personality::{PersonalityEval, GameContext, GamePhase, CHAOS, ROMANTIC, ENTROPY, ASYMMETRY, MOMENTUM, ZUGZWANG};
 
 /// The maximum centipawn contribution from the personality evaluation channel.
@@ -241,7 +241,7 @@ pub fn personality_move_bonus(mv: &Move, board: &Board, profile: &Profile) -> i3
         let to_rank = mv.to / 8;
         let piece = mv.piece;
         let is_back_rank_piece = matches!(piece, Piece::Knight | Piece::Bishop | Piece::Queen);
-        let is_white_to_move = board.side_to_move().is_white();
+        let is_white_to_move = board.side_to_move == Color::White;
         let is_developing_move = if is_white_to_move {
             from_rank == 0 && to_rank > from_rank
         } else {

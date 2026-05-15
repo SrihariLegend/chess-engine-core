@@ -433,7 +433,7 @@ pub struct UndoInfo {
     pub halfmove_clock: u16,
     pub fullmove_number: u16,
     pub zobrist_hash: u64,
-    pub position_history: Vec<u64>,
+    pub position_history: Option<Vec<u64>>,
 }
 
 // ─── FenError ─────────────────────────────────────────────────────────────────
@@ -893,7 +893,7 @@ impl Board {
             halfmove_clock: self.halfmove_clock,
             fullmove_number: self.fullmove_number,
             zobrist_hash: self.zobrist_hash,
-            position_history: self.position_history.clone(),
+            position_history: None,
         });
 
         let from = mv.from as usize;
@@ -1007,6 +1007,9 @@ impl Board {
         // 8. Update halfmove clock and position history
         if mv.piece == Piece::Pawn || mv.captured.is_some() {
             self.halfmove_clock = 0;
+            if let Some(undo) = self.history.last_mut() {
+                undo.position_history = Some(self.position_history.clone());
+            }
             self.position_history.clear();
         } else {
             self.halfmove_clock += 1;
@@ -1094,7 +1097,11 @@ impl Board {
         self.zobrist_hash = undo.zobrist_hash;
 
         // Restore position history from undo info
-        self.position_history = undo.position_history;
+        if let Some(position_history) = undo.position_history {
+            self.position_history = position_history;
+        } else {
+            self.position_history.pop();
+        }
 
         // Recompute occupancy
         self.update_occupancy();
@@ -1113,7 +1120,7 @@ impl Board {
             halfmove_clock: self.halfmove_clock,
             fullmove_number: self.fullmove_number,
             zobrist_hash: self.zobrist_hash,
-            position_history: self.position_history.clone(),
+            position_history: None,
         });
 
         // Clear en passant
