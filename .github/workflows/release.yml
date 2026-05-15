@@ -1,4 +1,4 @@
-name: Build & Upload Release Binaries
+name: Build and Upload Release Binaries
 
 on:
   release:
@@ -15,13 +15,12 @@ jobs:
         include:
           - os: ubuntu-latest
             asset_suffix: linux
-            exe_suffix: ""
-          - os: macos-latest
-            asset_suffix: macos
-            exe_suffix: ""
+            binary_source: target/release/chess-engine-core
+            binary_name: chess-engine-core-${{ github.ref_name }}-linux
           - os: windows-latest
             asset_suffix: windows
-            exe_suffix: ".exe"
+            binary_source: target/release/chess-engine-core.exe
+            binary_name: chess-engine-core-${{ github.ref_name }}-windows.exe
 
     runs-on: ${{ matrix.os }}
 
@@ -32,26 +31,14 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build (release)
-        run: cargo build --release
+        run: cargo build --release --locked
 
-      # CHANGE THIS if your produced binary name is different
-      - name: Package binary
+      - name: Prepare binary
         shell: bash
         run: |
-          set -euxo pipefail
-          BIN_NAME="chess-engine-core"
-          BIN_PATH="target/release/${BIN_NAME}${{ matrix.exe_suffix }}"
-
-          if [ ! -f "$BIN_PATH" ]; then
-            echo "Binary not found at $BIN_PATH"
-            echo "Available files in target/release:"
-            ls -la target/release || true
-            exit 1
-          fi
-
-          ASSET="${BIN_NAME}-${{ github.ref_name }}-${{ matrix.asset_suffix }}.tar.gz"
-          tar -czf "$ASSET" -C "target/release" "${BIN_NAME}${{ matrix.exe_suffix }}"
-          echo "ASSET=$ASSET" >> $GITHUB_ENV
+          mkdir -p dist
+          cp "${{ matrix.binary_source }}" "dist/${{ matrix.binary_name }}"
+          echo "ASSET=dist/${{ matrix.binary_name }}" >> $GITHUB_ENV
 
       - name: Upload asset to GitHub Release
         uses: softprops/action-gh-release@v2
