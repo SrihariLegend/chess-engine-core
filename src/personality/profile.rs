@@ -224,13 +224,13 @@ pub fn personality_move_bonus(mv: &Move, board: &Board, profile: &Profile) -> i3
                 bonus += signal_pref(&axes, 0) * 800.0;
             } else {
                 // Winning capture — all aggressive profiles like these
-                bonus += signal_pref(&axes, 2) * 600.0; // attack signal
+                bonus += signal_pref(&axes, 3) * 600.0; // attack signal
             }
         }
     }
 
     if is_promotion {
-        bonus += signal_pref(&axes, 2) * 400.0; // attack signal
+        bonus += signal_pref(&axes, 3) * 400.0; // attack signal
     }
 
     // ── Development detection ──
