@@ -15,14 +15,12 @@ jobs:
         include:
           - os: ubuntu-latest
             asset_suffix: linux
-            archive_ext: tar.gz
             binary_source: target/release/chess-engine-core
-            binary_name: chess-engine-core
+            binary_name: chess-engine-core-${{ github.ref_name }}-linux
           - os: windows-latest
             asset_suffix: windows
-            archive_ext: zip
             binary_source: target/release/chess-engine-core.exe
-            binary_name: chess-engine-core.exe
+            binary_name: chess-engine-core-${{ github.ref_name }}-windows.exe
 
     runs-on: ${{ matrix.os }}
 
@@ -35,26 +33,12 @@ jobs:
       - name: Build (release)
         run: cargo build --release --locked
 
-      - name: Package Linux binary
-        if: matrix.os == 'ubuntu-latest'
+      - name: Prepare binary
         shell: bash
         run: |
-          set -euxo pipefail
           mkdir -p dist
           cp "${{ matrix.binary_source }}" "dist/${{ matrix.binary_name }}"
-          ASSET="dist/chess-engine-core-${{ github.ref_name }}-${{ matrix.asset_suffix }}.${{ matrix.archive_ext }}"
-          tar -czf "$ASSET" -C dist "${{ matrix.binary_name }}"
-          echo "ASSET=$ASSET" >> $GITHUB_ENV
-
-      - name: Package Windows binary
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item "${{ matrix.binary_source }}" "dist/${{ matrix.binary_name }}"
-          $asset = "dist/chess-engine-core-${{ github.ref_name }}-${{ matrix.asset_suffix }}.${{ matrix.archive_ext }}"
-          Compress-Archive -Path "dist/${{ matrix.binary_name }}" -DestinationPath $asset -Force
-          Add-Content -Path $env:GITHUB_ENV -Value "ASSET=$asset"
+          echo "ASSET=dist/${{ matrix.binary_name }}" >> $GITHUB_ENV
 
       - name: Upload asset to GitHub Release
         uses: softprops/action-gh-release@v2
