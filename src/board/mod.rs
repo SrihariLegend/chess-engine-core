@@ -884,6 +884,7 @@ impl Board {
         let keys = zobrist_keys();
         let us = self.side_to_move.index();
         let them = self.side_to_move.opposite().index();
+        let resets_halfmove = mv.piece == Piece::Pawn || mv.captured.is_some();
 
         // 1. Save undo info
         self.history.push(UndoInfo {
@@ -893,7 +894,11 @@ impl Board {
             halfmove_clock: self.halfmove_clock,
             fullmove_number: self.fullmove_number,
             zobrist_hash: self.zobrist_hash,
-            position_history: None,
+            position_history: if resets_halfmove {
+                Some(self.position_history.clone())
+            } else {
+                None
+            },
         });
 
         let from = mv.from as usize;
@@ -1005,11 +1010,8 @@ impl Board {
         }
 
         // 8. Update halfmove clock and position history
-        if mv.piece == Piece::Pawn || mv.captured.is_some() {
+        if resets_halfmove {
             self.halfmove_clock = 0;
-            if let Some(undo) = self.history.last_mut() {
-                undo.position_history = Some(self.position_history.clone());
-            }
             self.position_history.clear();
         } else {
             self.halfmove_clock += 1;
